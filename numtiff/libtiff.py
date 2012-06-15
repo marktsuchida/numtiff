@@ -271,7 +271,12 @@ TIFFSetSubDirectory.restype = c_int
 libtiff.TIFFSetField.restype = c_int
 def TIFFSetField(tiff, tag, *args):
     func = libtiff.TIFFSetField
-    func.argtypes = [c_TIFF_p, c_ttag_t] + list(_tiff_field_types[tag])
+    # All 'float' parameters in the variable arguments are to be promoted to
+    # double by the C compiler. Note that the same does NOT apply to
+    # TIFFGetField().
+    field_types = [(c_double if t is c_float else t) for t in
+                   _tiff_field_types[tag]]
+    func.argtypes = [c_TIFF_p, c_ttag_t] + field_types
     ret = func(tiff, tag, *args)
     func.argtypes = None
     return ret
