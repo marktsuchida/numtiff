@@ -50,13 +50,13 @@ def read_bilevel_stripped_image(tiff):
     TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, byref(width))
     width = width.value
     if width < 1:
-        raise IOError("zero or negative image width")
+        raise IOError("zero image width")
 
     height = c_uint32()
     TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, byref(height))
     height = height.value
     if height < 1:
-        raise IOError("zero or negative image height")
+        raise IOError("zero image height")
 
     if TIFFIsTiled(tiff):
         raise IOError("reading of tiled image not implemented")
@@ -129,13 +129,13 @@ def read_gray_stripped_image(tiff):
     TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, byref(width))
     width = width.value
     if width < 1:
-        raise IOError("zero or negative image width")
+        raise IOError("zero image width")
 
     height = c_uint32()
     TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, byref(height))
     height = height.value
     if height < 1:
-        raise IOError("zero or negative image height")
+        raise IOError("zero image height")
 
     if TIFFIsTiled(tiff):
         raise IOError("reading of tiled image not implemented")
@@ -156,6 +156,70 @@ def read_gray_stripped_image(tiff):
     if inverse_intensity: # Only allowed above for uint samples.
         max_samp = 2 ** bits_per_sample - 1
         numpy.subtract(max_samp, raster, out=raster)
+
+    return raster
+
+
+def read_rgb_stripped_image(tiff):
+    photometric = c_uint16()
+    TIFFGetFieldDefaulted(tiff, TIFFTAG_PHOTOMETRIC, byref(photometric))
+    photometric = photometric.value
+    if photometric != PHOTOMETRIC_RGB:
+        raise IOError("expected RGB image")
+
+    samples_per_pixel = c_uint16()
+    TIFFGetFieldDefaulted(tiff, TIFFTAG_SAMPLESPERPIXEL,
+                          byref(samples_per_pixel))
+    samples_per_pixel = samples_per_pixel.value
+    if samples_per_pixel != 3:
+        raise IOError("expected 3 samples per pixel; found %d" %
+                      samples_per_pixel)
+
+    bits_per_sample = c_uint16()
+    TIFFGetFieldDefaulted(tiff, TIFFTAG_BITSPERSAMPLE, byref(bits_per_sample))
+    bits_per_sample = bits_per_sample.value
+    if bits_per_sample != 8:
+            raise IOError("expected 8-bits per sample")
+
+    sample_format = c_uint16()
+    TIFFGetFieldDefaulted(tiff, TIFFTAG_SAMPLEFORMAT, byref(sample_format))
+    sample_format = sample_format.value
+    if sample_format != SAMPLEFORMAT_UINT:
+        raise IOError("sample format must be unsigned integer")
+
+    width = c_uint32()
+    TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, byref(width))
+    width = width.value
+    if width < 1:
+        raise IOError("zero image width")
+
+    height = c_uint32()
+    TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, byref(height))
+    height = height.value
+    if height < 1:
+        raise IOError("zero image height")
+
+    if TIFFIsTiled(tiff):
+        raise IOError("reading of tiled image not implemented")
+    strip_byte_count = TIFFStripSize(tiff)
+
+    planar_config = c_uint16()
+    TIFFGetFieldDefaulted(tiff, TIFFTAG_PLANARCONFIG, byref(planar_config))
+    planar_config = planar_config.value
+    if planar_config != PLANARCONFIG_CONTIG:
+        raise IOError("reading of planar image not implemented")
+
+    rows_per_strip = c_uint32()
+    TIFFGetField(tiff, TIFFTAG_ROWSPERSTRIP, byref(rows_per_strip))
+    rows_per_strip = rows_per_strip.value
+
+    raster = numpy.empty((height, width, samples_per_pixel), dtype=numpy.uint8)
+
+    for strip in xrange(TIFFNumberOfStrips(tiff).value):
+        start_row = strip * rows_per_strip
+        stop_row = min(start_row + rows_per_strip, height)
+        buffer = raster[start_row:stop_row, :, :].ctypes.data_as(c_tdata_t)
+        TIFFReadEncodedStrip(tiff, strip, buffer, -1)
 
     return raster
 
@@ -252,4 +316,57 @@ def write_gray_stripped_image(tiff, image, multiplane=False, compression=None):
         size = (stop_row - start_row) * bytes_per_row
         TIFFWriteEncodedStrip(tiff, strip, buffer, size)
     TIFFWriteDirectory(tiff)
+
+
+def write_rgb_stripped_image(tiff, image, multiplane=False, compression=None):
+    image = numpy.asarray(image)
+    dtype = image.dtype
+    if dtype.kind != "u" or dtype.itemsize != 1:
+        raise ValueError("image array must have type uint8")
+    if not dtype.isnative:
+        dtype = dtype.newbyteorder("=")
+    image = numpy.require(image, dtype, ["C_CONTIGUOUS", "ALIGNED"])
+
+    try:
+        height, width, samples_per_pixel = image.shape
+        assert height and width
+        assert samples_per_pixel == 3
+    except:
+        raise ValueError("image must be a non-empty 3D array with " +
+                         "axis 2 having length 3")
+
+    bits_per_sample = 8
+    bytes_per_row = width * samples_per_pixel * dtype.itemsize
+
+    TIFFSetField(tiff, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB)
+    TIFFSetField(tiff, TIFFTAG_IMAGEWIDTH, width)
+    TIFFSetField(tiff, TIFFTAG_IMAGELENGTH, height)
+    TIFFSetField(tiff, TIFFTAG_SAMPLESPERPIXEL, samples_per_pixel)
+    TIFFSetField(tiff, TIFFTAG_BITSPERSAMPLE, bits_per_sample)
+    TIFFSetField(tiff, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT)
+    if compression is not None:
+        TIFFSetField(tiff, TIFFTAG_COMPRESSION, compression)
+
+    rows_per_strip = TIFFDefaultStripSize(tiff, 8192)
+    TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, rows_per_strip)
+
+    TIFFSetField(tiff, TIFFTAG_XRESOLUTION, 72.0)
+    TIFFSetField(tiff, TIFFTAG_YRESOLUTION, 72.0)
+    TIFFSetField(tiff, TIFFTAG_RESOLUTIONUNIT, RESUNIT_INCH)
+
+    TIFFSetField(tiff, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG)
+
+    if multiplane:
+        TIFFSetField(tiff, TIFFTAG_SUBFILETYPE, FILETYPE_PAGE)
+
+    TIFFSetField(tiff, TIFFTAG_SOFTWARE, "numpytiff")
+
+    for strip in xrange(TIFFNumberOfStrips(tiff).value):
+        start_row = strip * rows_per_strip
+        stop_row = min(start_row + rows_per_strip, height)
+        buffer = image[start_row:stop_row, :, :].ctypes.data_as(c_tdata_t)
+        size = (stop_row - start_row) * bytes_per_row
+        TIFFWriteEncodedStrip(tiff, strip, buffer, size)
+    TIFFWriteDirectory(tiff)
+
 
