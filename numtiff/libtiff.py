@@ -36,8 +36,11 @@ with open(temp_module, "w") as f:
         f.write("%s = %d\n" % (name, value))
 sys.path.insert(0, temp_module_path)
 from tiff_defines import *
+sys.path.pop(0)
 os.unlink(temp_module)
-os.unlink(temp_module + "c")
+for compiled_module in (temp_module + "c", temp_module + "o"):
+    if os.path.exists(compiled_module):
+        os.unlink(compiled_module)
 os.rmdir(temp_module_path)
 
 class c_ttag_t(c_uint32): pass
