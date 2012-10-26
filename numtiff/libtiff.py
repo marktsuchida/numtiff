@@ -9,10 +9,26 @@ from ctypes import c_void_p, c_char_p, POINTER, byref
 from ctypes import c_int, c_long, c_ulong, c_uint8, c_uint16, c_uint32
 from ctypes import c_float, c_double
 
+# Load libtiff.
 libtiff_path = ctypes.util.find_library("tiff")
 libtiff = ctypes.cdll.LoadLibrary(libtiff_path)
+
+# Find tiff.h.
+# This will likely work on Mac OS X:
 tiff_include_path = os.path.join(os.path.dirname(libtiff_path), "..", "include")
-tiff_dot_h = os.path.join(tiff_include_path, "tiff.h")
+# On Linux, libtiff_path might just be a filename (like libtiff.so). I'm not
+# sure what the proper way is to locate the corresponding include path, but for
+# now we search some candidates:
+possible_include_paths = [tiff_include_path,
+                          "/usr/local/include",
+                          "/usr/include"]
+for path in possible_include_paths:
+    tiff_dot_h = os.path.join(path, "tiff.h")
+    if os.path.exists(tiff_dot_h):
+        break
+else:
+    raise RuntimeError("cannot locate tiff.h")
+
 
 def _tiff_tag_constants(tiff_dot_h):
     macros = {}
@@ -21,12 +37,10 @@ def _tiff_tag_constants(tiff_dot_h):
             words = line.split()
             if len(words) and words[0] == "#define":
                 if len(words) >= 3:
-                    name, value = words[1:3]
-                    value = value.split("/*", 1)[0]
-                    if value in macros:
-                        macros[name] = macros[value]
-                    else:
-                        macros[name] = eval(value)
+                    name = words[1]
+                    value = " ".join(words[2:]).split("/*", 1)[0].strip()
+                    # Python syntax is close enough to C for this purpose.
+                    macros[name] = eval(value, macros.copy())
     return macros
 
 temp_module_path = tempfile.mkdtemp()
