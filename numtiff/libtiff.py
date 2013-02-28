@@ -4,14 +4,24 @@ import os
 import os.path
 
 from ctypes import c_void_p, c_char_p, POINTER, byref
-from ctypes import c_int, c_long, c_ulong, c_uint8, c_uint16, c_uint32
+from ctypes import c_int, c_long, c_ulong, c_ssize_t
+from ctypes import c_uint8, c_uint16, c_uint32, c_uint64
 from ctypes import c_float, c_double
 
-# Load libtiff.
+
+# Load LibTIFF.
 libtiff_path = ctypes.util.find_library("tiff")
 libtiff = ctypes.cdll.LoadLibrary(libtiff_path)
 
-# Find tiff.h.
+try:
+    libtiff.TIFFStripSize64
+    has_bigtiff = True # LibTIFF version >= 4.0.0.
+except AttributeError:
+    has_bigtiff = False # LibTIFF version < 4.0.0.
+
+
+# Find tiff.h, which contains #defines for constants.
+
 # This will likely work on Mac OS X:
 tiff_include_path = os.path.join(os.path.dirname(libtiff_path), "..", "include")
 # On Linux, libtiff_path might just be a filename (like libtiff.so). I'm not
@@ -28,6 +38,7 @@ else:
     raise RuntimeError("cannot locate tiff.h")
 
 
+# Scan tiff.h to extract constant definitions.
 def _tiff_tag_constants(tiff_dot_h):
     macros = {}
     with open(tiff_dot_h) as f:
@@ -44,20 +55,31 @@ def _tiff_tag_constants(tiff_dot_h):
 for name, value in _tiff_tag_constants(tiff_dot_h).iteritems():
     exec("%s = %d\n" % (name, value), globals(), locals())
 
+
+# Types defined in tiffio.h.
 class c_ttag_t(c_uint32): pass
 class c_tdir_t(c_uint16): pass
 class c_tsample_t(c_uint16): pass
 class c_tstrile_t(c_uint32): pass
 class c_tstrip_t(c_tstrile_t): pass
 class c_ttile_t(c_tstrile_t): pass
-class c_tsize_t(c_uint32): pass
 class c_tdata_t(c_void_p): pass
-class c_thandle_t(c_void_p): pass
-class c_toff_t(c_uint32): pass
+
+if has_bigtiff:
+    class c_tmsize_t(c_ssize_t): pass
+    class c_tsize_t(c_tmsize_t): pass
+    class c_toff_t(c_uint64): pass
+else:
+    class c_tsize_t(c_uint32): pass
+    class c_toff_t(c_uint32): pass
+
 
 class c_TIFF_p(c_void_p): pass
 
+
 # The argument types for TIFFGetField() and TIFFSetField().
+# Only those documented in man 3 TIFFGetField and man 3 TIFFSetField, with some
+# corrections.
 _tiff_field_types = \
    {
     TIFFTAG_ARTIST: (c_char_p,),
@@ -114,16 +136,19 @@ _tiff_field_types = \
     TIFFTAG_SMINSAMPLEVALUE: (c_double,),
     TIFFTAG_SOFTWARE: (c_char_p,),
     TIFFTAG_STONITS: (c_double,),
-    TIFFTAG_STRIPBYTECOUNTS: (POINTER(c_uint32),), # readonly
-    TIFFTAG_STRIPOFFSETS: (POINTER(c_uint32),), # readonly
+    TIFFTAG_STRIPBYTECOUNTS: (POINTER(c_uint64 if has_bigtiff
+                                      else c_uint32),), # readonly
+    TIFFTAG_STRIPOFFSETS: (POINTER(c_uint64 if has_bigtiff
+                                   else c_uint32),), # readonly
     TIFFTAG_SUBFILETYPE: (c_uint32,),
     TIFFTAG_SUBIFD: (c_uint16, POINTER(c_uint32)),
     TIFFTAG_TARGETPRINTER: (c_char_p,),
     TIFFTAG_THRESHHOLDING: (c_uint16,),
-    TIFFTAG_TILEBYTECOUNTS: (c_uint32,),
+    TIFFTAG_TILEBYTECOUNTS: ((c_uint64 if has_bigtiff else c_uint32),),
     TIFFTAG_TILEDEPTH: (c_uint32,),
     TIFFTAG_TILELENGTH: (c_uint32,),
-    TIFFTAG_TILEOFFSETS: (POINTER(c_uint32),), # readonly
+    TIFFTAG_TILEOFFSETS: (POINTER(c_uint64 if has_bigtiff
+                                  else c_uint32),), # readonly
     TIFFTAG_TILEWIDTH: (c_uint32,),
     TIFFTAG_TRANSFERFUNCTION: (POINTER(c_uint16),) * 3, # or * 1
     TIFFTAG_WHITEPOINT: (POINTER(c_float),),
@@ -136,6 +161,7 @@ _tiff_field_types = \
     TIFFTAG_YPOSITION: (c_float,),
     TIFFTAG_YRESOLUTION: (c_float,),
 }
+
 
 # man 3 TIFFClose
 TIFFClose = libtiff.TIFFClose
@@ -155,6 +181,9 @@ def show_errors(flag):
         libtiff.TIFFSetErrorHandler(c_void_p(default_handler))
     else:
         libtiff.TIFFSetErrorHandler(c_void_p(0))
+
+# man 3 TIFFField{DataType,Name,PassCount,ReadCount,Tag,WriteCount}
+# Not supporting.
 
 # man 3 TIFFFlush
 TIFFFlush = libtiff.TIFFFlush
