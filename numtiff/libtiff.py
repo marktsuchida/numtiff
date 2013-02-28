@@ -2,8 +2,6 @@ import ctypes
 import ctypes.util
 import os
 import os.path
-import sys
-import tempfile
 
 from ctypes import c_void_p, c_char_p, POINTER, byref
 from ctypes import c_int, c_long, c_ulong, c_uint8, c_uint16, c_uint32
@@ -43,19 +41,8 @@ def _tiff_tag_constants(tiff_dot_h):
                     macros[name] = eval(value, macros.copy())
     return macros
 
-temp_module_path = tempfile.mkdtemp()
-temp_module = os.path.join(temp_module_path, "tiff_defines.py")
-with open(temp_module, "w") as f:
-    for name, value in _tiff_tag_constants(tiff_dot_h).iteritems():
-        f.write("%s = %d\n" % (name, value))
-sys.path.insert(0, temp_module_path)
-from tiff_defines import *
-sys.path.pop(0)
-os.unlink(temp_module)
-for compiled_module in (temp_module + "c", temp_module + "o"):
-    if os.path.exists(compiled_module):
-        os.unlink(compiled_module)
-os.rmdir(temp_module_path)
+for name, value in _tiff_tag_constants(tiff_dot_h).iteritems():
+    exec("%s = %d\n" % (name, value), globals(), locals())
 
 class c_ttag_t(c_uint32): pass
 class c_tdir_t(c_uint16): pass
