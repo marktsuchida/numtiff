@@ -72,4 +72,4 @@ for more examples)::
     with numtiff.tiffopen("myimage.tif") as tif:
         photometric = ctypes.c_uint16()
         numtiff.TIFFGetFieldDefaulted(tif, numtiff.TIFFTAG_PHOTOMETRIC,
-                                      byref(photometric))
+                                      ctypes.byref(photometric))
